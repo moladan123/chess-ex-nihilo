@@ -1,9 +1,8 @@
-import random
 from tqdm import tqdm
 
 BISHOP_MOVES = [(1, 1), (-1, 1), (1, -1), (-1, -1)]
 ROOK_MOVES = [(0, 1), (1, 0), (0, -1), (-1, 0)]
-KNIGHT_MOVES = [(1, 2), (-1, 2), (-1, 2), (-1, -2), (2, 1), (-2, 1), (-2, 1), (-2, -1)]
+KNIGHT_MOVES = [(1, 2), (-1, 2), (1, -2), (-1, -2), (2, 1), (-2, 1), (2, -1), (-2, -1)]
 
 # Used to denote that the piece can move any distance
 ARBITRARY_DIST = 8
@@ -158,7 +157,7 @@ class State:
             eg if T is the tuple returned,
             the square is accessed by getting  ` board[T[0]][T[1]] `
         """
-        assert EAN_move[0] in "abcdefgh" and EAN_move[1] in "12345678"
+        assert EAN_move[0] in "abcdefgh" and EAN_move[1] in "12345678", "failed to get " + EAN_move
 
 
         col = ord(EAN_move[0]) - ord('a')
@@ -206,9 +205,12 @@ class State:
         col = chr(col + ord('a'))
         row = str(8 - row)
         return col + row
+        return col + row
 
     @staticmethod
     def convert_to_EAN(start, dest, extra_info=''):
+        if extra_info == CASTLE_QUEENSIDE or extra_info == CASTLE_KINGSIDE:
+            return extra_info
         return State._coord_to_EAN(start) + State._coord_to_EAN(dest) + extra_info
 
     @staticmethod
@@ -267,11 +269,16 @@ class State:
         for side in (1, -1):
             # Check within bounds and there is a piece there of the opposite color
             if 0 <= location[1] + side <= 7:
-                attacked = self.board[location[0] + direction][location[1] + side]
-                if attacked != EMPTY_SPACE and not State._is_same_color(attacked, piece):
-                    valid_moves.add(State.convert_to_EAN(location, (location[0] + direction, location[1] + side)))
+                dest = (location[0] + direction, location[1] + side)
+                attacked = self.board[dest[0]][dest[1]]
 
-                #TODO implement en passant
+                # Regular capture
+                if attacked != EMPTY_SPACE and not State._is_same_color(attacked, piece):
+                    valid_moves.add(State.convert_to_EAN(location, dest))
+
+                # En passant capture
+                elif State._coord_to_EAN(dest) == self.en_passants:
+                    valid_moves.add(State.convert_to_EAN(location, dest))
 
         # Add all possible pawn promotions if needed
         if location[0] == promotion_square:
@@ -343,10 +350,6 @@ class State:
 
         return valid_moves
 
-    def _get_pressure_maps(self):
-        """ Returns an 8x8 array with what squares are being attacked and how much """
-        pass
-
     def _check_for_check(self):
         """ Return true iff the current king is under attack """
 
@@ -393,6 +396,22 @@ class State:
             self.available_castles = self.available_castles.replace('K', '')
             self.available_castles = self.available_castles.replace('Q', '')
 
+    def _update_en_passant(self, start, dest, piece):
+        """ Updates the board if the move is en passant """
+        if piece.lower() != 'p':
+            self.en_passants = ''
+            return
+
+        # check if the pawn moves by two spaces
+        if abs(start[0] - dest[0]) == 2:
+            en_passant_square = (start[0] + dest[0]) // 2
+            self.en_passants = State._coord_to_EAN((en_passant_square, start[1]))
+            return
+
+        # Check if piece is eating via en passant, make sure to explicitly make the capture
+        if State._coord_to_EAN(dest) == self.en_passants:
+            self.board[start[0]][dest[1]] = EMPTY_SPACE
+
     def _update_board(self, start: (int, int), dest: (int, int), extra_info=''):
         """ updates self.board to with the given move """
 
@@ -424,7 +443,8 @@ class State:
                 self.board[row][3] = self.board[row][0]
                 self.board[row][0] = EMPTY_SPACE
 
-            # en passant TODO
+        # en passant
+        self._update_en_passant(start, dest, piece)
 
     def _move(self, start: (int, int), dest: (int, int), extra_info=''):
         """ Attempts to move the piece from the state to the dest coordinates
@@ -471,6 +491,8 @@ class State:
     def _AN_to_coords(self, move: str):
         """ Converts an algebraic notation move to internal coordinates """
 
+        orig_move = move
+
         extra_info = ""
 
         # remove all characters that don't matter when parsing
@@ -487,7 +509,7 @@ class State:
 
         # Pawn promotion
         if move[-2] == "=":
-            extra_info = move[-1]
+            extra_info = move[-1] if self.white_to_move else move[-1].lower()
             move = move[:-2]
 
         # Destination of move, this is the only guaranteed substring in the move
@@ -510,32 +532,25 @@ class State:
 
         possible_moves = self.get_all_moves()
         possible_moves = filter(lambda x: dest_str in x, possible_moves) # Filter to only moves that land on the right destination
-        possible_moves = filter(lambda x: loc_hint in x[0:2], possible_moves) # Filter to only moves that match the hint in the algebraic notation
+        possible_moves = list(filter(lambda x: loc_hint in x[0:2], possible_moves)) # Filter to only moves that match the hint in the algebraic notation
         for possible_move in possible_moves:
             row, col = State._EAN_coords_to_board_coords(possible_move[0:2])
             if self.board[row][col] == piece:
                 return (row, col), dest, extra_info
 
-        raise ValueError("Algebraic notation parsing failed, no valid move found matching the given move")
+        raise ValueError("Algebraic notation parsing failed, no valid move found matching the given move " + orig_move
+                         + " with board state\n" + str(self))
 
 
     def __str__(self):
-        ret = ""
+        ret = "White to move\n" if self.white_to_move else "Black to move\n"
         for index, row in enumerate(self.board):
-            ret += chr(ord('A') + index) + "\t" + " ".join(row) + "\n"
-        ret += "\n \t1 2 3 4 5 6 7 8"
+            ret += str(8 - index) + "\t" + " ".join(row) + "\n"
+        ret += "\n \tA B C D E F G H"
         return ret
 
-WHITE_WIN = "1-0"
-BLACK_WIN = "0-1"
-DRAW = "1/2-1/2"
-
-if __name__ == "__main__":
-    s = State()
-
-    # Done using games downloaded from https://database.lichess.org/
-    # The files are far too large to put in a git repository
-    with open("games/lichess_elite_2020-05.pgn") as pgn_file:
+def get_games_data(pgn_filename):
+    with open(pgn_filename) as pgn_file:
         all_lines = pgn_file.readlines()
 
     # For each game, make a dictionary with all the information
@@ -574,4 +589,16 @@ if __name__ == "__main__":
                 # Keep reading input until we are done
                 curr_game_moves += line.rstrip() + " "
 
+    return all_games
+
+
+
+
+if __name__ == "__main__":
+    s = State()
+
+    # Done using games downloaded from https://database.lichess.org/
+    # The files are far too large to put in a git repository
+
+    all_games = get_games_data("games/lichess_elite_2020-05.pgn")
     print(len(all_games), "total games detected")
