@@ -20,5 +20,13 @@ class TestMovement(unittest.TestCase):
         self.assertIn("    k r        ", str(s))
         self.assertIn("    K R        ", str(s))
 
+    def test_promotion(self):
+        s = chess.State(FEN_state="7k/P7/8/8/8/8/p7/7K w KQkq - 0 1")
+        s.move("a8=Q")
+        s.move("a1=Q")
+        self.assertIn("Q             k", str(s))
+        self.assertIn("q             K", str(s))
+
+
 if __name__ == '__main__':
     unittest.main()

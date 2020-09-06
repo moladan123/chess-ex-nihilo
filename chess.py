@@ -424,12 +424,8 @@ class State:
         # Special moves
         if extra_info:
 
-            # Pawn promotion is always in the form /=[QBNRqbnr]/
-            if extra_info[0] == "=":
-                self.board[dest[0]][dest[1]] = extra_info[1]
-
             # Castling kingside
-            elif extra_info == CASTLE_KINGSIDE:
+            if extra_info == CASTLE_KINGSIDE:
                 row = self._get_castling_row()
 
                 # We already moved the king, so we just need to move the rook
@@ -442,6 +438,9 @@ class State:
                 # King already moved, so just update the rook
                 self.board[row][3] = self.board[row][0]
                 self.board[row][0] = EMPTY_SPACE
+
+            else: # Pawn promotion
+                self.board[dest[0]][dest[1]] = extra_info
 
         # en passant
         self._update_en_passant(start, dest, piece)
